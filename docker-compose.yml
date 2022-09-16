@@ -1,0 +1,176 @@
+version: "3"
+
+services:
+
+  mongo:
+    image: mongo:4.4.15
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
+    volumes:
+      - mongodb:/data/db
+      - mongoconfig:/data/config
+    networks:
+      - net
+    restart: always
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo mongo:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  mongo-express:
+    image: mongo-express:0.54
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=admin
+      - ME_CONFIG_MONGODB_SERVER=mongo
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - net
+    restart: always
+
+  postgres:
+    image: postgres:14.4
+    volumes:
+      - pgdb:/var/lib/postgresql/data
+      #- ./db:/docker-entrypoint-initdb.d
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=pguser
+      - POSTGRES_PASSWORD=pguser
+      - POSTGRES_DB=pgdb
+    networks:
+      - net
+    restart: always
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-q",
+          "-d",
+          "${POSTGRES_DB:-pgdb}",
+          "-U",
+          "${POSTGRES_USER:-pguser}"
+        ]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment: 
+      PGADMIN_DEFAULT_EMAIL: "admin@admin.com"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+    ports:
+      - "5050:80"
+    depends_on: 
+      postgres:
+        condition: service_healthy
+    networks:
+      - net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.4.0
+    hostname: zookeeper
+    container_name: zookeeper
+    networks:
+      - net
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-server:5.4.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    networks:
+      - net
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://kafka:9092
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper:2181
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: "true"
+      CONFLUENT_SUPPORT_CUSTOMER_ID: "anonymous"
+    healthcheck:
+      test: nc -z localhost 9092 || exit -1
+      start_period: 15s
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  kafka-tools:
+    image: confluentinc/cp-kafka:5.4.0
+    hostname: kafka-tools
+    container_name: kafka-tools
+    command: kafka-topics --zookeeper zookeeper:2181 --topic kairos_events --create --partitions=1 --replication-factor=1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - net
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8092:8080
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - net
+
+  redis:
+    image: redis:6.2-alpine
+    command: redis-server --save 20 1
+    hostname: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - net
+
+  
+  redis-commander:
+    container_name: redis-commander
+    hostname: redis-commander
+    image: ghcr.io/joeferner/redis-commander:latest
+    restart: always
+    environment:
+    - REDIS_HOSTS=local:redis:6379
+    ports:
+    - "8082:8081"
+    networks:
+    - net
+
+volumes:
+  pgdb:
+  mongodb:
+  mongoconfig:
+
+networks:
+  net:
