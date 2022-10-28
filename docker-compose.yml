@@ -167,6 +167,19 @@ services:
     networks:
     - net
 
+  sonar:
+    image: sonarsource/sonar-scanner-cli:4.7
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+    networks:
+      - net
+    environment:
+      SONAR_HOST_URL: ${SONAR_HOST_URL}
+      SONAR_LOGIN: ${SONAR_LOGIN}
+      SONAR_PROJECT_VERSION: ${PACKAGE_VERSION}
+    command: sonar-scanner
+
 volumes:
   pgdb:
   mongodb:
